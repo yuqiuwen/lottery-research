@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -34,19 +35,40 @@ def _load_dotenv(path: Path) -> None:
             os.environ[key] = value
 
 
+def _read_setting(name: str) -> str:
+    """读取配置项：环境变量 / .env 优先，Streamlit 进程里再回退到 ``st.secrets``。
+
+    Streamlit Community Cloud 的 Secrets 面板配的是 ``st.secrets``，根级键虽然也会
+    注入环境变量，但注入时机不一定早于本模块 import，所以这里显式兜一层。
+    非 Streamlit 进程（CLI）不会去 import streamlit，避免拖慢命令行。
+    """
+    value = (os.environ.get(name) or "").strip()
+    if value:
+        return value
+    if "streamlit" in sys.modules:
+        try:
+            import streamlit as st
+
+            return str(st.secrets.get(name) or "").strip()
+        except Exception:
+            return ""
+    return ""
+
+
 _load_dotenv(PROJECT_ROOT / ".env")
 
 # 可用环境变量 LOTTERY_DB_PATH 指向其他数据库文件（便于测试或部署到别处）
-DB_PATH = Path(os.environ.get("LOTTERY_DB_PATH") or (DATA_DIR / "lottery.db"))
+DB_PATH = Path(_read_setting("LOTTERY_DB_PATH") or (DATA_DIR / "lottery.db"))
 
 APP_TITLE = "双色球数据分析平台"
 APP_ICON = "🎯"
 
 # 「数据管理」页的访问口令：**只从环境变量注入，代码里不留任何默认值**。
-# 可用 export、也可写进项目根目录的 .env（已在 .gitignore 中忽略）。
+# 可用 export、也可写进项目根目录的 .env（已在 .gitignore 中忽略）；
+# 部署到 Streamlit Cloud 时写在 Secrets 面板（根级键，会同时成为环境变量）。
 # 未配置时管理页不可达，入口只提示如何配置。
 ADMIN_PASSWORD_ENV = "LOTTERY_ADMIN_PASSWORD"
-ADMIN_PASSWORD = (os.environ.get(ADMIN_PASSWORD_ENV) or "").strip()
+ADMIN_PASSWORD = _read_setting(ADMIN_PASSWORD_ENV)
 ADMIN_PASSWORD_CONFIGURED = bool(ADMIN_PASSWORD)
 
 # 视觉规范：红球红、蓝球蓝

@@ -1,5 +1,5 @@
-streamlit>=1.36
-pandas>=2.0
-plotly>=5.18
+streamlit>=1.66
+pandas>=2.2
+plotly>=5.24
 requests>=2.31
 lxml>=5.0

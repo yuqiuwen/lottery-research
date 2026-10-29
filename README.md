@@ -103,6 +103,41 @@ LOTTERY_ADMIN_PASSWORD='你的口令' ./run.sh
 > Get Help / Report a bug / About 三个条目（纯链接或纯文本），无法插入自定义交互项，
 > 所以管理入口用侧边栏内的「⋯」浮层实现。
 
+## 部署到 Streamlit Community Cloud
+
+新建 app 时选 `yuqiuwen/lottery-research`、分支 `main`、主文件 `app.py`，然后在 **Advanced settings** 里做两件事：
+
+1. **Python version** 选 `3.13`。代码用到了 `st.iframe`、`st.popover(type=...)`、`width="stretch"` 等新 API，
+   旧版本会直接报错，`requirements.txt` 也把 `streamlit` 下限提到了 `1.66`。
+2. **Secrets** 填 TOML（根级键会注入为环境变量；代码优先读环境变量，读不到再回退 `st.secrets`，两种写法都生效）：
+
+```toml
+LOTTERY_ADMIN_PASSWORD = "换成你的口令"
+```
+
+> 注意别写成 `[lottery]` 之类的表，**只有根级键才会变成环境变量**；写成表就只能用 `st.secrets` 取。
+
+需要配置的变量就这两个：
+
+| 变量 | 作用 | 云端 |
+| --- | --- | --- |
+| `LOTTERY_ADMIN_PASSWORD` | 「数据管理」页口令 | **必填**，不填则该页不可达（fail closed） |
+| `LOTTERY_DB_PATH` | 指定 SQLite 文件路径 | 可选，默认 `data/lottery.db` |
+
+### 数据不会持久（部署前必读）
+
+Community Cloud 的容器文件系统是**临时**的：应用休眠后唤醒、或每次重新部署，仓库都会被重新拉一遍，
+`data/lottery.db` 回到仓库里的状态——仓库里没有这个文件，就是**空库**，得重新抓。
+
+三条路：
+
+- **每次重启后重新抓**：打开应用点「抓取全部历史」或「抓取最近 100 期」（约 14 秒 / 1 秒）
+- **把数据库快照提交进仓库**：`data/` 目前被 `.gitignore` 忽略，需要开个例外放一份 `seed` 库，
+  启动时若目标文件不存在就复制出来。适合「只要历史数据、不常新增」的用法
+- **换成外部数据库**：Turso / Supabase / Neon 之类，改 `lottery/db.py` 的连接层。要长期稳定只能走这条
+
+只读页面不依赖数据库写入，空库时会落到引导页，引导页的抓取按钮不需要口令。
+
 ## 只读数据接口（供 AI / 脚本调用）
 
 `lottery/api.py` 是一层纯函数接口，`lottery/cli.py` 把它暴露成命令。**只读、不写库、stdout 只有 JSON**，可以直接 `json.loads`，也可以让 AI 通过 Skill 调用。
