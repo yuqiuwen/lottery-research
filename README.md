@@ -234,3 +234,7 @@ ON CONFLICT(period) DO UPDATE SET ...
 - 数据来自公开开奖信息，仅用于数据分析与可视化练习，**不构成任何投注建议**。
 - 抓取按年份分片并留有请求间隔，请勿高频调用对方接口。
 - 可通过环境变量 `LOTTERY_DB_PATH` 指定其他数据库文件，`LOTTERY_ADMIN_PASSWORD` 指定「数据管理」口令。
+
+## 许可
+
+Apache License 2.0，见 [LICENSE](LICENSE)。
