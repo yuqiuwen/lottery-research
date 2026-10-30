@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import api, config
+from . import api, config, snapshot
 from .crawler import CrawlerService
 from .crawler.periods import current_year_end
 from .db import Database
@@ -65,6 +65,18 @@ def build_parser() -> argparse.ArgumentParser:
     crawl.add_argument("--all", action="store_true", help="抓取 2003 年至今全部历史")
     crawl.add_argument("--source", default="auto", choices=["auto", "500", "cwl"], help="数据源")
     crawl.add_argument("--force", action="store_true", help="覆盖已存在期号（默认仅补缺失）")
+
+    # ---- CSV 快照
+    export = sub.add_parser(
+        "export", parents=[common], help="把数据库导出为 CSV 快照（提交进 git）"
+    )
+    export.add_argument("--out", help="输出路径，默认 data/draws.csv")
+
+    restore = sub.add_parser(
+        "restore", parents=[common], help="从 CSV 快照装载数据（空库时用于重建）"
+    )
+    restore.add_argument("--from", dest="source", help="快照路径，默认 data/draws.csv")
+    restore.add_argument("--force", action="store_true", help="覆盖已存在期号（默认只补缺失）")
 
     # ---- 只读接口
     sub.add_parser("schema", parents=[common], help="输出接口说明（AI 第一步调用）")
@@ -165,6 +177,15 @@ def _progress(ratio: float, message: str) -> None:
 
 
 def _run_crawl(args: argparse.Namespace) -> int:
+    if config.READ_ONLY:
+        print(
+            "当前为只读模式（LOTTERY_READ_ONLY=1），拒绝写入。\n"
+            "只读模式用于文件系统不持久化的部署环境；请在本地抓取后执行 "
+            "`python -m lottery.cli export` 并提交 data/draws.csv。",
+            file=sys.stderr,
+        )
+        return 2
+
     db = Database(args.db) if args.db else Database()
     db.init_schema()
     service = CrawlerService(db, source=args.source)
@@ -192,6 +213,32 @@ def _run_crawl(args: argparse.Namespace) -> int:
     for error in report.errors[:5]:
         print(f"  ! {error}")
     return 0 if report.ok or report.fetched else 1
+
+
+# ---------------------------------------------------------------- 快照
+def _run_snapshot(args: argparse.Namespace) -> int:
+    db = Database(args.db) if args.db else Database()
+    db.init_schema()
+
+    if args.command == "export":
+        rows = snapshot.export(db, args.out)
+        payload = api.envelope(
+            "导出 CSV 快照",
+            data={"path": str(snapshot.resolve_path(args.out)), "rows": rows},
+        )
+    else:
+        added = snapshot.restore(db, args.source, overwrite=args.force)
+        payload = api.envelope(
+            "从 CSV 快照装载",
+            data={
+                "path": str(snapshot.resolve_path(args.source)),
+                "added": added,
+                "total": db.stats().count,
+            },
+        )
+
+    _emit(payload, args)
+    return 0
 
 
 # ---------------------------------------------------------------- 只读分发
@@ -256,6 +303,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "crawl":
         return _run_crawl(args)
+    if args.command in {"export", "restore"}:
+        return _run_snapshot(args)
 
     try:
         payload = _dispatch(args)

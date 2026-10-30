@@ -4,9 +4,35 @@ from __future__ import annotations
 
 import streamlit as st
 
+from .. import config, snapshot
 from ..crawler.periods import current_year_end
 from ..db import Database
 from . import common as U
+
+
+def _render_read_only() -> None:
+    """只读部署（如 Streamlit Community Cloud）且快照没装载成功时的说明页。"""
+    info = snapshot.describe()
+    if info["exists"]:
+        state = f"存在 · {info['rows']:,} 期 · {info['size_kb']} KB"
+    else:
+        state = "缺失"
+    st.warning(
+        "当前是**只读部署**，数据库为空，且没有找到可用的 CSV 快照，所以没有任何数据可看。"
+    )
+    st.markdown(
+        f"""
+**这个部署的数据来自仓库里的 CSV 快照**，容器启动时自动装载进临时 SQLite，
+因此页面无法自己抓取。请检查：
+
+1. `{info['path']}` 是否已提交到仓库（本地用 `python -m lottery.cli export` 生成）；
+2. 部署的 Secrets 里是否误设了 `LOTTERY_READ_ONLY=0`；
+3. 若快照刚更新，重启应用（Manage app → Reboot）让它重新装载。
+
+快照状态：**{state}**
+        """
+    )
+    st.caption("数据更新由仓库的定时任务负责，不需要在这个页面操作。")
 
 
 def render(db: Database) -> None:
@@ -20,6 +46,10 @@ def render(db: Database) -> None:
         unsafe_allow_html=True,
     )
     st.write("")
+
+    if config.READ_ONLY:
+        _render_read_only()
+        return
 
     st.info("数据库还是空的，先抓一批开奖数据吧。抓取会按期号去重，重复执行不会产生重复记录。")
 

@@ -58,6 +58,8 @@ python3 -m venv .venv
 .venv/bin/python -m lottery.cli crawl --start 2026001 --end 2026123
 .venv/bin/python -m lottery.cli crawl --recent 100
 .venv/bin/python -m lottery.cli stats
+.venv/bin/python -m lottery.cli export                      # 导出 CSV 快照（提交进 git）
+.venv/bin/python -m lottery.cli restore                     # 从 CSV 快照恢复数据
 ```
 
 （激活过 `.venv` 的话，直接 `python -m lottery.cli ...` 即可。）
@@ -117,26 +119,55 @@ LOTTERY_ADMIN_PASSWORD = "换成你的口令"
 
 > 注意别写成 `[lottery]` 之类的表，**只有根级键才会变成环境变量**；写成表就只能用 `st.secrets` 取。
 
-需要配置的变量就这两个：
+需要配置的变量：
 
 | 变量 | 作用 | 云端 |
 | --- | --- | --- |
 | `LOTTERY_ADMIN_PASSWORD` | 「数据管理」页口令 | **必填**，不填则该页不可达（fail closed） |
 | `LOTTERY_DB_PATH` | 指定 SQLite 文件路径 | 可选，默认 `data/lottery.db` |
+| `LOTTERY_SNAPSHOT_PATH` | CSV 快照路径 | 可选，默认 `data/draws.csv` |
+| `LOTTERY_READ_ONLY` | 只读模式（禁止抓取与删除） | 云端建议设 `1` |
 
-### 数据不会持久（部署前必读）
+### 数据怎么不丢：CSV 快照 + 启动装载
 
-Community Cloud 的容器文件系统是**临时**的：应用休眠后唤醒、或每次重新部署，仓库都会被重新拉一遍，
-`data/lottery.db` 回到仓库里的状态——仓库里没有这个文件，就是**空库**，得重新抓。
+Community Cloud 的容器文件系统是**临时**的：休眠唤醒或重新部署，仓库都会被重新拉一遍，
+`data/lottery.db` 回到仓库里的状态——这个文件被 `.gitignore` 忽略，所以就是**空库**。
 
-三条路：
+这里用的办法是**把数据当构建产物**：
 
-- **每次重启后重新抓**：打开应用点「抓取全部历史」或「抓取最近 100 期」（约 14 秒 / 1 秒）
-- **把数据库快照提交进仓库**：`data/` 目前被 `.gitignore` 忽略，需要开个例外放一份 `seed` 库，
-  启动时若目标文件不存在就复制出来。适合「只要历史数据、不常新增」的用法
-- **换成外部数据库**：Turso / Supabase / Neon 之类，改 `lottery/db.py` 的连接层。要长期稳定只能走这条
+```
+本地/CI:  SQLite  ──export──▶  data/draws.csv  ──commit──▶  仓库
+云端:     仓库 ──pull──▶ data/draws.csv ──restore──▶ 临时 SQLite（容器内，可丢弃）
+```
 
-只读页面不依赖数据库写入，空库时会落到引导页，引导页的抓取按钮不需要口令。
+- `data/draws.csv`（约 360 KB，3500+ 期）**提交进仓库**，`.gitignore` 里对它开了例外
+- 应用启动时 `get_db()` 会调 `snapshot.ensure_ready()`：**只在库为空时**装载一次，
+  库非空则原样不动（不会覆盖你本地已有的数据）
+- 装载用 `INSERT OR IGNORE`，保留快照里真实的 `updated_at`，所以「最后更新」显示的是抓取时间而不是启动时间
+- 云端设 `LOTTERY_READ_ONLY=1` 后，抓取按钮与区间删除全部禁用，避免往临时库里写一堆重启即失的数据
+- 本地正常模式抓取成功后会自动重新导出快照（`persist_snapshot()`），保持 CSV 与库同步
+
+命令行对应两个子命令，也能单独用：
+
+```bash
+.venv/bin/python -m lottery.cli export            # 库 → data/draws.csv
+.venv/bin/python -m lottery.cli export --out /tmp/x.csv
+.venv/bin/python -m lottery.cli restore           # 快照 → 库（仅补缺失）
+.venv/bin/python -m lottery.cli restore --force   # 覆盖同主键记录
+```
+
+### 定时更新数据（GitHub Actions）
+
+`.github/workflows/update-data.yml` 在**北京时间周一/三/五 02:00**（对应周日/二/四开奖的次日）
+自动跑：`restore` → `crawl --recent 10` → `export` → 有新数据就 `commit + push`。
+也可以到 Actions 页面点 **Run workflow** 手动触发。仓库需要允许 Actions 写入
+（Settings → Actions → General → Workflow permissions 选 *Read and write*）。
+
+这样一来云端的数据新鲜度取决于仓库里 CSV 的新鲜度，而 CSV 由 Actions 维护，**不需要在网页上点抓取**。
+
+> 如果哪天想换成真正的外部数据库（Turso / Supabase / Neon），改 `lottery/db.py` 的连接层即可，
+> 上层接口不用动。目前这个方案的好处是零外部依赖、零费用、数据可 review（CSV 的 diff 很直观）。
+
 
 ## 只读数据接口（供 AI / 脚本调用）
 
@@ -203,20 +234,25 @@ lottery-research/
 ├── .env.example            # 环境变量模板（复制成 .env 用，.env 已被 git 忽略）
 ├── requirements.txt        # 依赖声明
 ├── requirements.lock.txt   # 验证过的精确版本
+├── .github/workflows/
+│   └── update-data.yml     # 定时抓取 + 提交 CSV 快照
 ├── lottery/
 │   ├── config.py           # 路径、配色、规则常量
 │   ├── models.py           # DrawRecord / CrawlReport 等数据模型
 │   ├── db.py               # SQLite 访问层（建表、upsert、查询、日志）
+│   ├── snapshot.py         # CSV 快照：导出 / 恢复 / 空库自动装载
 │   ├── analytics.py        # 频率、遗漏、形态特征、冷热、导出
 │   ├── api.py              # 只读接口层：纯函数 + 统一 JSON 信封
 │   ├── charts.py           # Plotly 图表构造
-│   ├── cli.py              # 命令行：抓取 + 只读查询子命令
+│   ├── cli.py              # 命令行：抓取 + 快照 + 只读查询子命令
 │   ├── crawler/
 │   │   ├── periods.py      # 期号规范化、按年切片
 │   │   ├── sources.py      # 500 彩票网 / 福彩官网 数据源
 │   │   └── service.py      # 抓取服务（分片、去重、入库、日志）
 │   └── ui/                 # 各页面与公共组件
-├── data/lottery.db         # 运行后生成
+├── data/
+│   ├── draws.csv           # CSV 快照（提交进仓库，云端靠它拿数据）
+│   └── lottery.db          # 运行后生成，不入库
 ├── .venv/                  # 项目虚拟环境（已创建，git 忽略）
 └── docs/                   # 截图
 ```
@@ -268,7 +304,8 @@ ON CONFLICT(period) DO UPDATE SET ...
 
 - 数据来自公开开奖信息，仅用于数据分析与可视化练习，**不构成任何投注建议**。
 - 抓取按年份分片并留有请求间隔，请勿高频调用对方接口。
-- 可通过环境变量 `LOTTERY_DB_PATH` 指定其他数据库文件，`LOTTERY_ADMIN_PASSWORD` 指定「数据管理」口令。
+- 可通过环境变量 `LOTTERY_DB_PATH` 指定其他数据库文件，`LOTTERY_ADMIN_PASSWORD` 指定「数据管理」口令，
+  `LOTTERY_SNAPSHOT_PATH` 指定 CSV 快照位置，`LOTTERY_READ_ONLY=1` 开启只读模式（云端部署用）。
 
 ## 许可
 

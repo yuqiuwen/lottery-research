@@ -60,6 +60,19 @@ _load_dotenv(PROJECT_ROOT / ".env")
 # 可用环境变量 LOTTERY_DB_PATH 指向其他数据库文件（便于测试或部署到别处）
 DB_PATH = Path(_read_setting("LOTTERY_DB_PATH") or (DATA_DIR / "lottery.db"))
 
+# CSV 快照：数据以文本形式放进仓库，空库时自动装载。
+# 部署到没有持久磁盘的环境（如 Streamlit Community Cloud）时，云端靠它拿到数据。
+SNAPSHOT_PATH = Path(_read_setting("LOTTERY_SNAPSHOT_PATH") or (DATA_DIR / "draws.csv"))
+
+# 只读模式：文件系统不会持久化的环境必须打开，禁止一切写库操作。
+# 否则用户抓取完看着有数据，容器一重启就全没了 —— 比空库更糟。
+READ_ONLY = (_read_setting("LOTTERY_READ_ONLY") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 APP_TITLE = "双色球数据分析平台"
 APP_ICON = "🎯"
 

@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from .. import analytics as A
-from .. import config
+from .. import config, snapshot
 from ..crawler.periods import current_year_end, next_period, pretty, try_normalize_period
 from ..crawler.sources import SOURCE_LABELS
 from ..db import Database
@@ -15,6 +15,16 @@ from . import common as U
 
 def render(db: Database, data: pd.DataFrame) -> None:
     stats = db.stats()
+
+    if config.READ_ONLY:
+        st.info(
+            "**只读模式**　当前部署环境不保存文件，抓取的数据会在下次重启时消失，"
+            "所以这里禁用了所有写入。\n\n"
+            "数据由仓库里的 `data/draws.csv` 提供，仓库的定时任务（GitHub Actions）"
+            "会在每期开奖后自动抓取并提交。想手动补数据：本地执行 "
+            "`python -m lottery.cli crawl --recent 10`，再 `python -m lottery.cli export`，"
+            "提交并推送 `data/draws.csv`，然后重启应用。"
+        )
 
     U.render_last_report()
 
@@ -37,13 +47,14 @@ def render(db: Database, data: pd.DataFrame) -> None:
     )
 
     b1, b2, b3, b4 = st.columns(4)
-    if b1.button("抓取区间", type="primary", width="stretch"):
+    locked = config.READ_ONLY
+    if b1.button("抓取区间", type="primary", width="stretch", disabled=locked):
         U.run_crawl(db, start_raw, end_raw, source=source, only_missing=only_missing)
-    if b2.button("增量抓取最新", width="stretch"):
+    if b2.button("增量抓取最新", width="stretch", disabled=locked):
         U.run_crawl(db, default_start, current_year_end(), source=source, only_missing=True)
-    if b3.button("抓取最近 100 期", width="stretch"):
+    if b3.button("抓取最近 100 期", width="stretch", disabled=locked):
         U.run_recent(db, 100, source=source)
-    if b4.button("抓取全部历史", width="stretch"):
+    if b4.button("抓取全部历史", width="stretch", disabled=locked):
         U.run_crawl(db, "2003001", current_year_end(), source=source, only_missing=True)
 
     st.caption(
@@ -59,6 +70,15 @@ def render(db: Database, data: pd.DataFrame) -> None:
     m3.metric("最晚期号", pretty(stats.max_period) if stats.max_period else "—")
     m4.metric("数据库大小", f"{stats.size_bytes / 1024:.0f} KB")
     st.caption(f"数据文件：`{config.DB_PATH}`　最后更新：{(stats.last_updated or '—').replace('T', ' ')}")
+
+    snap = snapshot.describe()
+    if snap["exists"]:
+        st.caption(
+            f"CSV 快照：`{snap['path']}`　{snap['rows']:,} 期 / {snap['size_kb']} KB"
+            "（提交进仓库，空库时自动装载）"
+        )
+    else:
+        st.caption("CSV 快照：尚未生成，执行 `python -m lottery.cli export` 创建")
 
     with st.expander("抓取日志（最近 15 次）", expanded=False):
         runs = db.recent_runs(15)
@@ -99,12 +119,13 @@ def render(db: Database, data: pd.DataFrame) -> None:
         del_start = c1.text_input("起始期号", key="del_start", placeholder="如 2026001")
         del_end = c2.text_input("结束期号", key="del_end", placeholder="如 2026010")
         confirm = st.checkbox("我确认删除该区间的数据", key="del_confirm")
-        if st.button("执行删除", disabled=not confirm, key="del_button"):
+        if st.button("执行删除", disabled=not confirm or config.READ_ONLY, key="del_button"):
             start, end = try_normalize_period(del_start), try_normalize_period(del_end)
             if start is None or end is None or start > end:
                 st.error("期号格式不正确，或起始期号大于结束期号")
             else:
                 removed = db.delete_range(start, end)
+                U.persist_snapshot()
                 U.refresh_data()
                 st.success(f"已删除 {removed} 条记录（{start} ~ {end}）")
                 st.rerun()

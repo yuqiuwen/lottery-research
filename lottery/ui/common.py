@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from .. import analytics as A
-from .. import config
+from .. import config, snapshot
 from ..crawler.periods import PeriodError, normalize_period, pretty, try_normalize_period
 from ..db import Database
 from ..models import CrawlReport
@@ -20,7 +20,21 @@ PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
 # ---------------------------------------------------------------- 资源
 @st.cache_resource(show_spinner=False)
 def get_db() -> Database:
-    return Database(config.DB_PATH).init_schema()
+    """打开数据库；空库时先尝试从 CSV 快照装载（云端部署靠这一步拿到数据）。"""
+    db = Database(config.DB_PATH).init_schema()
+    snapshot.ensure_ready(db)
+    return db
+
+
+def persist_snapshot() -> None:
+    """把当前数据同步到 CSV 快照。只读模式跳过；失败记到 session 里稍后提示。"""
+    if config.READ_ONLY:
+        return
+    try:
+        st.session_state["snapshot_rows"] = snapshot.export(get_db())
+        st.session_state.pop("snapshot_error", None)
+    except OSError as exc:
+        st.session_state["snapshot_error"] = str(exc)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -330,6 +344,7 @@ def _with_progress(worker) -> None:
 
     bar.empty()
     st.session_state["last_crawl"] = report
+    persist_snapshot()
     refresh_data()
     st.rerun()
 
@@ -383,3 +398,11 @@ def render_last_report() -> None:
         with st.expander("查看失败详情", expanded=False):
             for error in report.errors[:20]:
                 st.text(error)
+
+    failure = st.session_state.pop("snapshot_error", None)
+    if failure:
+        st.warning(f"CSV 快照写入失败：{failure}")
+    else:
+        rows = st.session_state.pop("snapshot_rows", None)
+        if rows:
+            st.caption(f"已同步 CSV 快照：{rows:,} 期 → `{config.SNAPSHOT_PATH.name}`")

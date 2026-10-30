@@ -1,0 +1,50 @@
+name: 更新开奖数据
+
+# 双色球每周二、四、日 21:15（北京时间）开奖，这里在次日凌晨 02:00 抓取，
+# 换算成 UTC 就是前一天 18:00，所以 cron 的日子是 周日 / 周二 / 周四。
+on:
+  schedule:
+    - cron: "0 18 * * 0,2,4"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 从 CSV 快照装载
+        run: python -m lottery.cli restore
+
+      - name: 抓取最新数据
+        run: python -m lottery.cli crawl --recent 10
+
+      - name: 导出 CSV 快照
+        run: python -m lottery.cli export
+
+      - name: 有新数据则提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/draws.csv
+          if git diff --cached --quiet; then
+            echo "没有新数据，跳过提交"
+            exit 0
+          fi
+          git commit -m "数据：更新开奖记录 $(date -u +%Y-%m-%d)"
+          git push
