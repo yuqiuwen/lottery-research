@@ -12,8 +12,29 @@ from ..db import Database
 from . import common as U
 
 # 「近期开奖」每点一次「查看更多」多加载几期
-RECENT_STEP = 10
+RECENT_STEP = 20
 RECENT_KEY = "recent_shown"
+SCROLL_KEY = "recent_scroll_to"
+
+# 把内层滚动区定位到第 __INDEX__ 行（新加载的第一行）
+_SCROLL_TMPL = """
+<script>
+(function () {
+  var idx = __INDEX__, p = window.parent, tries = 0;
+  function run() {
+    var list = p.document.querySelector('.ssq-list');
+    var rows = list ? list.querySelectorAll('.ssq-row') : [];
+    if (!list || !rows[idx]) {
+      if (++tries < 40) return setTimeout(run, 150);
+      return;
+    }
+    list.scrollTop = rows[idx].getBoundingClientRect().top
+                   - list.getBoundingClientRect().top + list.scrollTop;
+  }
+  run();
+})();
+</script>
+"""
 
 
 def render(db: Database, data: pd.DataFrame) -> None:
@@ -45,6 +66,7 @@ def render(db: Database, data: pd.DataFrame) -> None:
     shown = _recent_shown(len(data))
     st.markdown(U.draws_list_html(data, limit=shown), unsafe_allow_html=True)
     _recent_more(len(data), shown)
+    _recent_autoscroll()
 
     st.write("")
     st.markdown('<div class="ssq-section">号码频率速览</div>', unsafe_allow_html=True)
@@ -86,7 +108,22 @@ def _recent_more(total: int, shown: int) -> None:
         width="stretch",
     ):
         st.session_state[RECENT_KEY] = shown + min(RECENT_STEP, remaining)
+        # 记下新内容的第一行，下次渲染完把列表滚到这里
+        st.session_state[SCROLL_KEY] = shown
         st.rerun()
+
+
+def _recent_autoscroll() -> None:
+    """把列表滚到新加载的第一行。
+
+    列表是固定高度的内层滚动区，新行追加在底部，不主动滚一下的话
+    用户还停在原处、看不到新内容。内层 scrollTop 从 Python 拿不到，
+    只能用一段脚本量行偏移后赋值。
+    """
+    index = st.session_state.pop(SCROLL_KEY, None)
+    if index is None:
+        return
+    st.iframe(_SCROLL_TMPL.replace("__INDEX__", str(int(index))), height=1)
 
 
 def _lookup(db: Database) -> None:
