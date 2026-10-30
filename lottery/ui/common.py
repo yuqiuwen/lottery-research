@@ -96,7 +96,15 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 .ssq-ball.blue { background: radial-gradient(circle at 32% 26%, #79aae9, #2358ad 78%); }
 .ssq-meta { display: flex; gap: 22px; flex-wrap: wrap; font-size: 12.5px; color: #6b7280; }
 .ssq-meta b { color: #374151; font-weight: 600; }
-.ssq-list { border: 1px solid #eef1f5; border-radius: 14px; overflow: hidden; background: #fff; }
+.ssq-list {
+    border: 1px solid #eef1f5; border-radius: 14px; background: #fff;
+    max-height: min(480px, 62vh); overflow-x: hidden; overflow-y: auto;
+    scrollbar-width: thin;
+}
+.ssq-list::-webkit-scrollbar { width: 8px; }
+.ssq-list::-webkit-scrollbar-thumb { background: #dfe3ea; border-radius: 999px; }
+.ssq-list::-webkit-scrollbar-thumb:hover { background: #cfd5df; }
+.ssq-list::-webkit-scrollbar-track { background: transparent; }
 .ssq-row {
     display: flex; align-items: center; gap: 14px; padding: 9px 16px; border-bottom: 1px solid #f3f5f8;
     font-size: 13px;

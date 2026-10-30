@@ -11,6 +11,10 @@ from ..crawler.periods import pretty, try_normalize_period
 from ..db import Database
 from . import common as U
 
+# 「近期开奖」每点一次「查看更多」多加载几期
+RECENT_STEP = 10
+RECENT_KEY = "recent_shown"
+
 
 def render(db: Database, data: pd.DataFrame) -> None:
     stats = db.stats()
@@ -38,7 +42,9 @@ def render(db: Database, data: pd.DataFrame) -> None:
             U.export_button(
                 data, key="export_overview", compact=True, show_range=False
             )
-    st.markdown(U.draws_list_html(data, limit=10), unsafe_allow_html=True)
+    shown = _recent_shown(len(data))
+    st.markdown(U.draws_list_html(data, limit=shown), unsafe_allow_html=True)
+    _recent_more(len(data), shown)
 
     st.write("")
     st.markdown('<div class="ssq-section">号码频率速览</div>', unsafe_allow_html=True)
@@ -51,6 +57,36 @@ def render(db: Database, data: pd.DataFrame) -> None:
         U.show_fig(C.frequency_bar(A.frequency_table(data, "red"), "red", "红球出现次数"))
     with right:
         U.show_fig(C.frequency_bar(A.frequency_table(data, "blue"), "blue", "蓝球出现次数"))
+
+
+def _recent_shown(total: int) -> int:
+    """当前展示的期数：累加式分页，并夹在当前范围的总期数内。
+
+    追加的是更早的期号（列表越往下越旧），所以点「查看更多」时
+    已经看到的行不会移位，页面不会跳。
+    """
+    shown = int(st.session_state.get(RECENT_KEY, RECENT_STEP) or RECENT_STEP)
+    shown = max(RECENT_STEP, shown)
+    if total and shown > total:
+        shown = total
+    st.session_state[RECENT_KEY] = shown
+    return shown
+
+
+def _recent_more(total: int, shown: int) -> None:
+    """列表底部的「查看更多」，全部加载完后不再显示。"""
+    remaining = total - shown
+    if remaining <= 0:
+        if total > RECENT_STEP:
+            st.caption(f"已显示全部 {total} 期")
+        return
+    if st.button(
+        f"查看更多（还有 {remaining} 期）",
+        key="recent_more",
+        width="stretch",
+    ):
+        st.session_state[RECENT_KEY] = shown + min(RECENT_STEP, remaining)
+        st.rerun()
 
 
 def _lookup(db: Database) -> None:
