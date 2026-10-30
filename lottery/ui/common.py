@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Iterable
 
@@ -15,6 +16,9 @@ from ..db import Database
 from ..models import CrawlReport
 
 PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
+
+# 手机 UA 粗判：Android 平板不带 "Mobile"，会被当成桌面（屏幕大，误触概率低，这样更合理）
+_MOBILE_UA = re.compile(r"iPhone|iPod|Android.*Mobile|Windows Phone|IEMobile|BlackBerry", re.I)
 
 
 # ---------------------------------------------------------------- 资源
@@ -110,6 +114,13 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 .ssq-hint { font-size: 12.5px; color: #98a0ac; margin-bottom: 8px; }
 div[data-testid="stMetricValue"] { font-size: 24px; }
 div[data-testid="stMetricLabel"] { font-size: 12.5px; color: #8a93a3; }
+/* 窄屏：把纵向手势交还给浏览器，避免在图表上滑动时被 Plotly 抢走（PC 不受影响） */
+@media (max-width: 768px) {
+    .js-plotly-plot, .js-plotly-plot .nsewdrag,
+    .js-plotly-plot .draglayer, .js-plotly-plot .plot-container {
+        touch-action: pan-y !important;
+    }
+}
 /* 侧边栏右下角的管理入口 */
 .st-key-admin_dock { padding-top: 4px; }
 </style>
@@ -176,7 +187,23 @@ def draws_list_html(data: pd.DataFrame, limit: int = 10) -> str:
 
 
 # ---------------------------------------------------------------- 图表
+def is_small_screen() -> bool:
+    """是否手机屏：按 User-Agent 粗判。
+
+    Python 侧拿不到视口宽度（``st.context.headers`` 是 websocket 握手头，
+    连 ``Sec-CH-UA-Mobile`` 都没有），只能看 UA 字符串。
+    """
+    try:
+        ua = st.context.headers.get("User-Agent", "") or ""
+    except Exception:  # 非 Streamlit 运行环境（脚本里 import）没有请求上下文
+        return False
+    return bool(_MOBILE_UA.search(ua))
+
+
 def show_fig(fig) -> None:
+    # 手机上关掉拖拽：Plotly 会把单指拖拽当成框选缩放，还会 preventDefault 吃掉页面滑动。
+    # 桌面保留 zoom，框选放大密集图表时有用。CSS 里另有一条 touch-action 兜底。
+    fig.update_layout(dragmode=False if is_small_screen() else "zoom")
     try:
         st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
     except TypeError:  # 兼容旧版 Streamlit
