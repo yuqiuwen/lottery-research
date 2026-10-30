@@ -38,13 +38,32 @@ jobs:
         run: python -m lottery.cli export
 
       - name: 有新数据则提交
+        env:
+          TZ: Asia/Shanghai # 提交信息用北京日期，与 cron 注释对齐（默认 UTC 会差一天）
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/draws.csv
-          if git diff --cached --quiet; then
-            echo "没有新数据，跳过提交"
-            exit 0
-          fi
-          git commit -m "数据：更新开奖记录 $(date -u +%Y-%m-%d)"
-          git push
+
+          # 本 job 运行期间远程可能被手动推送过，直接 push 会 non-fast-forward 失败。
+          # 被拒时以远程为基准重置，再从库里重新导出：restore 会把远程新增的期号补进库，
+          # export 写出的就是「本地抓到的 ∪ 远程已有的」，不会丢期号。
+          for attempt in 1 2 3; do
+            git add data/draws.csv
+            if git diff --cached --quiet; then
+              echo "没有新数据，跳过提交"
+              exit 0
+            fi
+            git commit -m "数据：更新开奖记录 $(date +%F)"
+            if git push origin HEAD:main; then
+              echo "已推送（第 $attempt 次尝试）"
+              exit 0
+            fi
+            echo "推送被拒（第 $attempt 次）：以远程为基准重新生成快照"
+            git fetch origin
+            git reset --hard origin/main
+            python -m lottery.cli restore
+            python -m lottery.cli export
+            sleep 5
+          done
+          echo "::error::连续 3 次推送失败，检查仓库 Workflow permissions 是否允许写入" >&2
+          exit 1
