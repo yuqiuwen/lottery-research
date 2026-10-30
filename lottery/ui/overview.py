@@ -28,8 +28,12 @@ _SCROLL_TMPL = """
       if (++tries < 40) return setTimeout(run, 150);
       return;
     }
-    list.scrollTop = rows[idx].getBoundingClientRect().top
-                   - list.getBoundingClientRect().top + list.scrollTop;
+    var top = rows[idx].getBoundingClientRect().top
+            - list.getBoundingClientRect().top + list.scrollTop;
+    // 平滑滚动；系统开了「减少动态效果」时直接跳，尊重无障碍设置
+    var reduce = p.matchMedia && p.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (list.scrollTo) list.scrollTo({ top: top, behavior: reduce ? 'auto' : 'smooth' });
+    else list.scrollTop = top;
   }
   run();
 })();
