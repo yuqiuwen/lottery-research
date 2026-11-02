@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--out", help="输出路径，默认 data/draws.csv")
 
     restore = sub.add_parser(
-        "restore", parents=[common], help="从 CSV 快照装载数据（空库时用于重建）"
+        "restore", parents=[common], help="把 CSV 快照里缺的期号补进数据库"
     )
     restore.add_argument("--from", dest="source", help="快照路径，默认 data/draws.csv")
     restore.add_argument("--force", action="store_true", help="覆盖已存在期号（默认只补缺失）")

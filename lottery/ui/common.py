@@ -24,9 +24,17 @@ _MOBILE_UA = re.compile(r"iPhone|iPod|Android.*Mobile|Windows Phone|IEMobile|Bla
 # ---------------------------------------------------------------- 资源
 @st.cache_resource(show_spinner=False)
 def get_db() -> Database:
-    """打开数据库；空库时先尝试从 CSV 快照装载（云端部署靠这一步拿到数据）。"""
+    """打开数据库，并把 CSV 快照里缺的期号补上。
+
+    - 云端：容器是空的，这一步等于全量装载（数据来源）
+    - 本地：``git pull`` 拉下新快照后，启动应用即自动同步，不用手动 restore
+
+    ``restore`` 走 ``INSERT OR IGNORE``，只补不覆盖：库里已有、快照里没有的期号
+    不会被删，内容不同的也不会被改写，所以本地抓到的新数据不会被旧快照回退。
+    全量 3500 行约 30~50ms，且有 ``@st.cache_resource`` 兜着，只在首次调用执行。
+    """
     db = Database(config.DB_PATH).init_schema()
-    snapshot.ensure_ready(db)
+    snapshot.restore(db)
     return db
 
 

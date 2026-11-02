@@ -1,4 +1,4 @@
-"""CSV 快照：把 draws 表导出成可提交进 git 的文本，空库时自动装载回来。
+"""CSV 快照：把 draws 表导出成可提交进 git 的文本，启动时把缺的期号补回来。
 
 为什么需要它：Streamlit Community Cloud 这类环境没有持久磁盘，容器一重启就
 回到仓库状态，写进去的数据全部消失。把数据以 CSV 形式放进仓库后——
@@ -84,7 +84,15 @@ def export(db: Database, path: str | Path | None = None) -> int:
 def restore(
     db: Database, path: str | Path | None = None, *, overwrite: bool = False
 ) -> int:
-    """把 CSV 装进数据库，返回新增（``overwrite`` 时含覆盖）的行数。"""
+    """把 CSV 装进数据库，返回新增（``overwrite`` 时含覆盖）的行数。
+
+    默认 ``INSERT OR IGNORE`` —— **只补缺失，不覆盖也不删除**。所以它可以
+    安全地反复执行：库里已有、快照里没有的期号不会被删，内容不同的也不会被改写，
+    本地刚抓到的新数据不会被旧快照回退。
+
+    应用启动时也会调用（见 ``ui.common.get_db``）：``git pull`` 拉下新快照后，
+    启动即自动同步，不需要手动跑 CLI。空库时等价于全量装载；快照缺失时返回 0。
+    """
     source = resolve_path(path)
     if not source.exists():
         return 0
@@ -99,17 +107,6 @@ def restore(
         conn.executemany(_REPLACE_SQL if overwrite else _INSERT_SQL, payload)
         after = conn.execute("SELECT COUNT(*) FROM draws").fetchone()[0]
     return after - before if not overwrite else len(payload)
-
-
-def ensure_ready(db: Database, path: str | Path | None = None) -> str:
-    """空库时从快照装载，供应用启动调用。
-
-    返回 ``existing``（本来就有数据）/ ``restored``（已从快照装载）/
-    ``missing``（既没数据也没快照，交给 onboarding 处理）。
-    """
-    if db.stats().count:
-        return "existing"
-    return "restored" if restore(db, path) else "missing"
 
 
 def describe(path: str | Path | None = None) -> dict:
