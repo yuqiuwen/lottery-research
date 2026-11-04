@@ -299,7 +299,8 @@ SOURCE_LABELS: dict[str, str] = {
 def build_sources(choice: str = "auto") -> list[Source]:
     """按选择构造数据源列表；``auto`` 返回带兜底的链。"""
     if choice == "auto":
-        return [Cwl500Source(), OfficialSource()]
+        # return [Cwl500Source(), OfficialSource()]
+        return [Cwl500Source()]
     if choice not in SOURCE_REGISTRY:
         raise ValueError(f"未知数据源：{choice}")
     return [SOURCE_REGISTRY[choice]()]
