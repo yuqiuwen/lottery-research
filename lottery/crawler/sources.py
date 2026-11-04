@@ -197,6 +197,7 @@ class OfficialSource(_HttpSource):
 
     name = "cwl"
     label = "福彩官网"
+    PAGE_URL = "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/"
     URL = "https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/findDrawNotice"
     PAGE_SIZE = 100
     MAX_PAGES = 80
@@ -205,13 +206,28 @@ class OfficialSource(_HttpSource):
         super().__init__(**kwargs)
         self.session.headers.update(
             {
-                "Referer": "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/",
+                "Referer": self.PAGE_URL,
                 "Accept": "application/json, text/javascript, */*; q=0.01",
                 "X-Requested-With": "XMLHttpRequest",
+                "User-Agent": self._get_user_agent(),
             }
         )
+        self._warmed_up = False
 
+    def _warmup(self):
+        if not self._warmed_up:
+            resp = self.session.get(self.PAGE_URL, timeout=20)
+            logger.debug(
+                "福彩页面预请求: status=%s, content-type=%s",
+                resp.status_code,
+                resp.headers.get("Content-Type"),
+            )
+            resp.raise_for_status()
+            self._warmed_up = True
+
+    
     def fetch(self, start: str, end: str) -> list[DrawRecord]:
+        self._warmup()
         start, end = normalize_period(start), normalize_period(end)
         records: list[DrawRecord] = []
         page = 1
