@@ -111,6 +111,7 @@ class _HttpSource:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": self._get_user_agent()})
 
+    @staticmethod
     def _get_user_agent() -> str:
         try:
             from fake_useragent import UserAgent
