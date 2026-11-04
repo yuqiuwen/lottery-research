@@ -39,8 +39,8 @@ jobs:
       # 这里用福彩官网强制覆盖最近 3 期把 0 补上：
       # 实测两个源的销量/奖池/奖级完全一致，内容没变时 upsert 判 unchanged，
       # 不会产生无意义 diff，也不会来回抖动。
-      - name: 用福彩官网补全销量（防 0 值残留）
-        run: python -m lottery.cli crawl --recent 3 --source cwl --force
+      # - name: 用福彩官网补全销量（防 0 值残留）
+      #   run: python -m lottery.cli crawl --recent 3 --source cwl --force
 
       - name: 导出 CSV 快照
         run: python -m lottery.cli export
