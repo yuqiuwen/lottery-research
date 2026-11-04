@@ -130,6 +130,13 @@ class _HttpSource:
         for attempt in range(self.retries + 1):
             try:
                 response = self.session.get(url, timeout=self.timeout, **kwargs)
+                if response.status_code == 403:
+                    logger.warning(
+                        "福彩官网 403: content-type=%r, server=%r, body=%r",
+                        response.headers.get("Content-Type"),
+                        response.headers.get("Server"),
+                        response.text[:500],
+                    )
                 if response.status_code >= 500:
                     raise FetchError(f"服务端返回 {response.status_code}")
                 response.raise_for_status()
