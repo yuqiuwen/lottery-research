@@ -34,3 +34,4 @@ tzdata==2026.6
 urllib3==2.8.0
 uvicorn==0.54.0
 websockets==17.3
+fake_useragent==2.2.0

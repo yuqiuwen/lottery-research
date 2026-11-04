@@ -109,7 +109,21 @@ class _HttpSource:
         self.timeout = timeout
         self.retries = retries
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": config.USER_AGENT})
+        self.session.headers.update({"User-Agent": self._get_user_agent()})
+
+    def _get_user_agent() -> str:
+        try:
+            from fake_useragent import UserAgent
+
+            return UserAgent(
+                browsers=["Chrome"],
+                os=["Linux"],
+                platforms=["desktop"],
+            ).random
+
+        except Exception as exc:
+            logger.debug("获取 fake-useragent 失败，使用固定 UA：%s", exc)
+            return config.USER_AGENT
 
     def _get(self, url: str, **kwargs) -> requests.Response:
         last_error: Exception | None = None

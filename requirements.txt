@@ -3,3 +3,4 @@ pandas>=2.2
 plotly>=5.24
 requests>=2.31
 lxml>=5.0
+fake_useragent>=2.2.0
